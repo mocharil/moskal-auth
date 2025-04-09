@@ -23,6 +23,11 @@ class UserResetPassword(BaseModel):
     token: str
     new_password: str = Field(..., min_length=8)
 
+class UserChangeEmail(BaseModel):
+    current_email: EmailStr
+    current_password: str
+    new_email: EmailStr
+
 class UserVerifyEmail(BaseModel):
     token: str
 
