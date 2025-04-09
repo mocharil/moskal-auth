@@ -14,7 +14,7 @@ from utils.send_email import send_verification_email, send_reset_password_email
 from app.schemas.user import (
     UserCreate, UserLogin, UserChangePassword, UserForgotPassword,
     UserResetPassword, UserVerifyEmail, Token, User, UserResponse,
-    LoginResponse
+    LoginResponse, UserChangeEmail
 )
 from app.models.user import User as UserModel
 from typing import Optional
@@ -377,3 +377,52 @@ async def verify_email(token: str, db: Session = Depends(get_db)):
     </html>
     """
     return HTMLResponse(content=success_html)
+
+@router.post("/change-email", response_model=UserResponse)
+async def change_email(
+    email_data: UserChangeEmail,
+    current_user: UserModel = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verify current email matches
+    if email_data.current_email != current_user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current email is incorrect"
+        )
+
+    # Verify current password
+    if not verify_password(email_data.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect password"
+        )
+    
+    # Check if new email is already taken
+    if db.query(UserModel).filter(
+        UserModel.email == email_data.new_email,
+        UserModel.id != current_user.id
+    ).first():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Update email and reset verification status
+    current_user.email = email_data.new_email
+    current_user.is_verified = False
+    current_user.verification_token = generate_verification_token()
+    db.commit()
+    
+    # Send verification email
+    verification_url = f"{settings.BASE_URL}/api/v1/auth/verify-email?token={current_user.verification_token}"
+    try:
+        send_verification_email(email_data.new_email, verification_url)
+    except Exception as e:
+        print(f"Failed to send verification email: {str(e)}")
+    
+    return UserResponse(
+        status="success",
+        message="Email updated successfully. Please check your new email for verification.",
+        data=current_user
+    )
