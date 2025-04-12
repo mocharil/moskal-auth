@@ -1,6 +1,8 @@
 from sqlalchemy import Boolean, Column, Integer, String, DateTime
 from datetime import datetime
+from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.models.project import Project, UserProject, GlobalAccess
 
 class User(Base):
     __tablename__ = "users"
@@ -16,3 +18,9 @@ class User(Base):
     reset_token_expires = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    owned_projects = relationship("Project", back_populates="owner", lazy="joined")
+    project_accesses = relationship("UserProject", back_populates="user", lazy="joined")
+    granted_accesses = relationship("GlobalAccess", back_populates="owner", foreign_keys="GlobalAccess.owner_id", lazy="joined")
+    received_accesses = relationship("GlobalAccess", back_populates="user", foreign_keys="GlobalAccess.user_id", lazy="joined")
