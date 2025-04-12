@@ -1,14 +1,14 @@
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
 from jose import jwt, JWTError
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.security import (
     verify_password, get_password_hash, create_access_token, create_refresh_token,
     verify_token, generate_verification_token, generate_password_reset_token,
-    is_token_expired
+    is_token_expired, get_current_user
 )
 from utils.send_email import send_verification_email, send_reset_password_email
 from app.schemas.user import (
@@ -20,40 +20,9 @@ from app.models.user import User as UserModel
 from typing import Optional
 
 router = APIRouter(
-    prefix="/auth",
+
     tags=["authentication"]
 )
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=True)
-
-# Helper function to get current user
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
-) -> UserModel:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    
-    try:
-        # Decode token manually for debugging
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        print(f"Token payload: {payload}")  # Debug print
-        user_id = payload.get("sub")
-        if not user_id:
-            print("No user_id in payload")  # Debug print
-            raise credentials_exception
-    except JWTError as e:
-        print(f"JWT decode error: {str(e)}")  # Debug print
-        raise credentials_exception
-        
-    user = db.query(UserModel).filter(UserModel.id == int(user_id)).first()
-    if not user:
-        raise credentials_exception
-    
-    return user
 
 @router.post("/register", response_model=UserResponse)
 async def register(user: UserCreate, db: Session = Depends(get_db)):

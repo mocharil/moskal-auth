@@ -10,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.core.config import settings
 from app.core.security import get_password_hash, generate_verification_token
 from app.models.user import Base, User
+from app.models.project import Project, UserProject, GlobalAccess, Language, ProjectRole, GlobalRole
 
 def init_db():
     # Create database engine
@@ -70,6 +71,61 @@ def init_db():
             db.add(user)
         
         # Commit the changes
+        db.commit()
+        # Create test projects for admin user
+        admin_user = db.query(User).filter(User.email == "admin@example.com").first()
+        regular_user = db.query(User).filter(User.email == "user@example.com").first()
+        
+        test_projects = [
+            {
+                "name": "Project Alpha",
+                "language": Language.INDONESIA,
+                "owner": admin_user
+            },
+            {
+                "name": "Project Beta",
+                "language": Language.ENGLISH,
+                "owner": admin_user
+            },
+            {
+                "name": "User Project",
+                "language": Language.INDONESIA,
+                "owner": regular_user
+            }
+        ]
+        
+        # Add projects to database
+        for project_data in test_projects:
+            project = Project(
+                name=project_data["name"],
+                owner_id=project_data["owner"].id,
+                language=project_data["language"],
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow()
+            )
+            db.add(project)
+        db.commit()
+
+        # Create test access relationships
+        admin_projects = db.query(Project).filter(Project.owner_id == admin_user.id).all()
+        
+        # Give regular user individual access to first project
+        if admin_projects:
+            project_access = UserProject(
+                user_id=regular_user.id,
+                project_id=admin_projects[0].id,
+                role=ProjectRole.PREVIEW_ONLY
+            )
+            db.add(project_access)
+
+        # Give admin global access to regular user's projects
+        global_access = GlobalAccess(
+            owner_id=regular_user.id,
+            user_id=admin_user.id,
+            role=GlobalRole.ADMINISTRATOR
+        )
+        db.add(global_access)
+        
         db.commit()
         print("Test data has been successfully added to the database.")
         
