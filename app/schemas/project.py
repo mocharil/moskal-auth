@@ -29,11 +29,22 @@ class ProjectBase(BaseModel):
 class ProjectCreate(ProjectBase):
     pass
 
+class ProjectKeyword(BaseModel):
+    project_name: str
+    relevan_keyword: List[str]
+    owner_id: int
+    project_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class Project(ProjectBase):
     id: int
     owner_id: int
     created_at: datetime
     updated_at: datetime
+    keywords: Optional[List[str]] = None
 
     class Config:
         from_attributes = True  # New Pydantic v2 attribute for ORM mode
@@ -80,3 +91,31 @@ class ProjectListResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ProjectDetailRequest(BaseModel):
+    email: str
+    project_name: str
+
+class ProjectDetailResponse(BaseModel):
+    name: str
+    language: Language
+    id: int
+    owner_id: int
+    created_at: datetime
+    updated_at: datetime
+    keywords: Optional[List[str]] = None
+    role: Optional[ProjectRole] = None
+    access_type: Optional[str] = None  # 'owner', 'individual', 'global', or None
+    owner_email: str
+    owner_name: Optional[str] = None
+    global_role: Optional[GlobalRole] = None
+
+    class Config:
+        from_attributes = True
+
+class ProjectDelete(BaseModel):
+    project_id: int
+
+class AccessDelete(BaseModel):
+    user_id: int
+    project_id: Optional[int] = None  # None for global access deletion
