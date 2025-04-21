@@ -7,28 +7,32 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
-# Install system dependencies
+# Install system dependencies including MySQL client and pkg-config
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc python3-dev \
+    && apt-get install -y --no-install-recommends \
+        gcc \
+        python3-dev \
+        default-libmysqlclient-dev \
+        pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Salin requirements.txt terlebih dahulu untuk memanfaatkan caching Docker
+# Copy requirements.txt first to leverage Docker caching
 COPY requirements.txt .
 
-# Install dependensi Python 
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Secara spesifik upgrade google-cloud-aiplatform ke versi terbaru
+# Specifically upgrade google-cloud-aiplatform to the latest version
 RUN pip install --no-cache-dir --upgrade google-cloud-aiplatform
 
-# Salin project files
+# Copy project files
 COPY . .
 
-# Buat file wrapper untuk menangani import error
+# Create wrapper file to handle import error
 RUN echo 'try:\n    from vertexai.generative_models import *\nexcept ImportError:\n    print("Warning: vertexai.generative_models tidak tersedia")\n    # Mock classes disini jika diperlukan' > /app/utils/gemini_wrapper.py
 
 # Expose port
 EXPOSE 8080
 
-# Menjalankan aplikasi dengan log level debug
+# Run application with debug log level
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "debug"]
