@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import List
 from app.core.database import get_db
 from app.core.security import get_current_user
@@ -12,8 +13,15 @@ from app.schemas.project import (
     GlobalAccessCreate,
     ProjectAccessCreate,
     ProjectListResponse,
-    ProjectAccessInfo
+    ProjectAccessInfo,
+    ProjectDetailRequest,
+    ProjectDetailResponse,
+    ProjectDelete,
+    AccessDelete
 )
+from utils.relevan_keyword import get_relevan_keyword
+from sqlalchemy import and_
+
 
 router = APIRouter(
     prefix="/project",
@@ -21,12 +29,96 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)]  # Add authentication for all project routes
 )
 
+@router.post("/detail", response_model=ProjectDetailResponse)
+async def get_project_detail(
+    request: ProjectDetailRequest,
+    db: Session = Depends(get_db)
+):
+    # Get user by email
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Get project by name and find access details
+    project = db.query(Project).filter(
+        and_(
+            Project.name == request.project_name,
+            Project.owner_id == user.id
+        )
+    ).first()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get project owner details
+    owner = db.query(User).filter(User.id == project.owner_id).first()
+    
+    # Get keywords
+    keywords = db.execute(
+        text("""
+            SELECT relevan_keyword 
+            FROM keyword_projects 
+            WHERE project_id = :project_id 
+            AND owner_id = :owner_id
+        """),
+        {"project_id": project.id, "owner_id": project.owner_id}
+    ).fetchall()
+    
+    # Check access type and role
+    access_type = "owner"
+    role = None
+    global_role = None
+    
+    if project.owner_id != user.id:
+        # Check individual access
+        individual_access = db.query(UserProject).filter(
+            and_(
+                UserProject.project_id == project.id,
+                UserProject.user_id == user.id
+            )
+        ).first()
+        
+        if individual_access:
+            access_type = "individual"
+            role = individual_access.role
+        else:
+            # Check global access
+            global_access = db.query(GlobalAccess).filter(
+                and_(
+                    GlobalAccess.owner_id == project.owner_id,
+                    GlobalAccess.user_id == user.id
+                )
+            ).first()
+            
+            if global_access:
+                access_type = "global"
+                global_role = global_access.role
+                role = ProjectRole.FULL_ACCESS if global_access.role == GlobalRole.ADMINISTRATOR else ProjectRole.PREVIEW_ONLY
+            else:
+                raise HTTPException(status_code=403, detail="No access to this project")
+
+    return ProjectDetailResponse(
+        name=project.name,
+        language=project.language,
+        id=project.id,
+        owner_id=project.owner_id,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        keywords=[k[0] for k in keywords] if keywords else None,
+        role=role,
+        access_type=access_type,
+        owner_email=owner.email,
+        owner_name=owner.full_name if hasattr(owner, 'full_name') else None,
+        global_role=global_role
+    )
+
 @router.post("/onboarding", response_model=List[ProjectSchema])
 async def create_onboarding(
     request: OnboardingRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+  
     # Check for duplicate project names
     for project_name in request.projects:
         existing_project = db.query(Project).filter(
@@ -39,6 +131,7 @@ async def create_onboarding(
                 detail=f"Project with name '{project_name}' already exists for this user"
             )
 
+    # Create projects
     projects = []
     for project_name in request.projects:
         project = Project(
@@ -53,6 +146,23 @@ async def create_onboarding(
     for project in projects:
         db.refresh(project)
     
+    # Generate keywords for all projects
+    keywords_response = get_relevan_keyword(projects)
+    
+    if keywords_response["status"] == "success":
+        # Group keywords by project_id
+        keywords_by_project = {}
+        for item in keywords_response["data"]:
+            project_id = item["project_id"]
+            if project_id not in keywords_by_project:
+                keywords_by_project[project_id] = []
+            keywords_by_project[project_id].append(item["relevan_keyword"])
+        
+        # Update each project with its keywords
+        for project in projects:
+            if project.id in keywords_by_project:
+                project.keywords = list(set(keywords_by_project[project.id]))
+
     return projects
 
 @router.post("/access/global", response_model=GlobalAccessCreate)
@@ -130,10 +240,38 @@ async def list_projects(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # Get owned projects
-    owned_projects = db.query(Project).filter(
+    # Get owned projects with keywords
+    owned_projects_query = db.query(Project).filter(
         Project.owner_id == current_user.id
-    ).all()
+    )
+    
+    owned_projects = []
+    for project in owned_projects_query.all():
+        # Get keywords for each project
+        keywords = db.execute(
+            text("""
+                SELECT relevan_keyword 
+                FROM keyword_projects 
+                WHERE project_id = :project_id 
+                AND owner_id = :owner_id
+            """),
+            {"project_id": project.id, "owner_id": current_user.id}
+        ).fetchall()
+        
+        # Convert keywords to list
+        project_keywords = [k[0] for k in keywords] if keywords else None
+        
+        # Create a dict with project attributes
+        project_dict = {
+            "id": project.id,
+            "name": project.name,
+            "owner_id": project.owner_id,
+            "language": project.language,
+            "created_at": project.created_at,
+            "updated_at": project.updated_at,
+            "keywords": project_keywords
+        }
+        owned_projects.append(project_dict)
     
     # Get projects with individual access
     individual_accesses = db.query(UserProject).filter(
@@ -149,9 +287,24 @@ async def list_projects(
     
     # Add individually accessible projects
     for access in individual_accesses:
+        project = access.project
+        # Get keywords for the project
+        keywords = db.execute(
+            text("""
+                SELECT relevan_keyword 
+                FROM keyword_projects 
+                WHERE project_id = :project_id 
+                AND owner_id = :owner_id
+            """),
+            {"project_id": project.id, "owner_id": project.owner_id}
+        ).fetchall()
+        
+        # Convert keywords to list and set it on the project
+        project.keywords = [k[0] for k in keywords] if keywords else None
+        
         accessible_projects.append(
             ProjectAccessInfo(
-                project=access.project,
+                project=project,
                 role=access.role,
                 access_type="individual"
             )
@@ -164,6 +317,20 @@ async def list_projects(
         ).all()
         
         for project in owner_projects:
+            # Get keywords for the project
+            keywords = db.execute(
+                text("""
+                    SELECT relevan_keyword 
+                    FROM keyword_projects 
+                    WHERE project_id = :project_id 
+                    AND owner_id = :owner_id
+                """),
+                {"project_id": project.id, "owner_id": project.owner_id}
+            ).fetchall()
+            
+            # Convert keywords to list and set it on the project
+            project.keywords = [k[0] for k in keywords] if keywords else None
+            
             # Map global role to project role
             project_role = ProjectRole.FULL_ACCESS if global_access.role == GlobalRole.ADMINISTRATOR else ProjectRole.PREVIEW_ONLY
             
@@ -179,3 +346,88 @@ async def list_projects(
         owned_projects=owned_projects,
         accessible_projects=accessible_projects
     )
+
+@router.delete("/remove")
+async def remove_project(
+    request: ProjectDelete,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Check if project exists and user is owner
+    project = db.query(Project).filter(
+        and_(
+            Project.id == request.project_id,
+            Project.owner_id == current_user.id
+        )
+    ).first()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found or you're not the owner")
+    
+    # Delete associated keywords
+    db.execute(
+        text("""
+            DELETE FROM keyword_projects 
+            WHERE project_id = :project_id 
+            AND owner_id = :owner_id
+        """),
+        {"project_id": project.id, "owner_id": current_user.id}
+    )
+    
+    # Delete associated access records
+    db.query(UserProject).filter(UserProject.project_id == project.id).delete()
+    
+    # Delete the project
+    db.delete(project)
+    db.commit()
+    
+    return {"message": "Project successfully deleted"}
+
+@router.delete("/access/remove")
+async def remove_access(
+    request: AccessDelete,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if request.project_id:
+        # Remove individual project access
+        project = db.query(Project).filter(
+            and_(
+                Project.id == request.project_id,
+                Project.owner_id == current_user.id
+            )
+        ).first()
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found or you're not the owner")
+        
+        access = db.query(UserProject).filter(
+            and_(
+                UserProject.project_id == request.project_id,
+                UserProject.user_id == request.user_id
+            )
+        ).first()
+        
+        if not access:
+            raise HTTPException(status_code=404, detail="Access not found")
+        
+        db.delete(access)
+        db.commit()
+        
+        return {"message": "Project access successfully removed"}
+    else:
+        # Remove global access
+        access = db.query(GlobalAccess).filter(
+            and_(
+                GlobalAccess.owner_id == current_user.id,
+                GlobalAccess.user_id == request.user_id
+            )
+        ).first()
+        
+        if not access:
+            raise HTTPException(status_code=404, detail="Global access not found")
+        
+        db.delete(access)
+        db.commit()
+        
+        return {"message": "Global access successfully removed"}
