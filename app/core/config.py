@@ -8,7 +8,7 @@ load_dotenv()
 class Settings(BaseModel):
     # Application Settings
     BASE_URL: str = "http://localhost:8000"  # Default value for local development
-    FRONTEND_URL: str = "http://localhost:3000"  # Default frontend URL
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")  # Default frontend URL
     
     # JWT Settings
     JWT_SECRET_KEY: str

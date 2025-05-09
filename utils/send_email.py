@@ -46,13 +46,14 @@ def create_html_message(content: str) -> str:
     </html>
     """
 
-def send_verification_email(to: str, verification_url: str) -> None:
+def send_verification_email(to: str, verification_url: str, cc: Optional[str] = None) -> None:
     """Send an email verification link to the user"""
     sender_email = os.getenv('EMAIL_SENDER')
     sender_password = os.getenv("EMAIL_PASSWORD")
     
+    # Validate required environment variables
     if not sender_email or not sender_password:
-        raise ValueError("Email sender credentials not configured")
+        raise ValueError("Missing required environment variables: EMAIL_SENDER or EMAIL_PASSWORD")
 
     subject = "Verify Your Email Address"
     
@@ -68,26 +69,36 @@ def send_verification_email(to: str, verification_url: str) -> None:
         <p>If you didn't create an account with us, please ignore this email.</p>
     """
     
+    # Construct message
     message = MIMEMultipart()
     message['Subject'] = subject
     message['From'] = sender_email
     message['To'] = to
+    if cc:
+        message['Cc'] = cc
     
     html_content = create_html_message(content)
     html_part = MIMEText(html_content, "html")
     message.attach(html_part)
     
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+    # Send email using Zoho SMTP with TLS
+    try:
+        server = smtplib.SMTP('smtp.zoho.com', 587)
+        server.starttls()
         server.login(sender_email, sender_password)
-        server.sendmail(sender_email, [to], message.as_string())
+        server.sendmail(sender_email, [to] + ([cc] if cc else []), message.as_string())
+        server.quit()
+    except Exception as e:
+        raise Exception(f"Failed to send email: {str(e)}")
 
-def send_reset_password_email(to: str, reset_url: str) -> None:
+def send_reset_password_email(to: str, reset_url: str, cc: Optional[str] = None) -> None:
     """Send a password reset link to the user"""
     sender_email = os.getenv('EMAIL_SENDER')
     sender_password = os.getenv("EMAIL_PASSWORD")
     
+    # Validate required environment variables
     if not sender_email or not sender_password:
-        raise ValueError("Email sender credentials not configured")
+        raise ValueError("Missing required environment variables: EMAIL_SENDER or EMAIL_PASSWORD")
 
     subject = "Reset Your Password"
     
@@ -103,26 +114,36 @@ def send_reset_password_email(to: str, reset_url: str) -> None:
         <p>If you didn't request a password reset, please ignore this email.</p>
     """
     
+    # Construct message
     message = MIMEMultipart()
     message['Subject'] = subject
     message['From'] = sender_email
     message['To'] = to
+    if cc:
+        message['Cc'] = cc
     
     html_content = create_html_message(content)
     html_part = MIMEText(html_content, "html")
     message.attach(html_part)
     
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+    # Send email using Zoho SMTP with TLS
+    try:
+        server = smtplib.SMTP('smtp.zoho.com', 587)
+        server.starttls()
         server.login(sender_email, sender_password)
-        server.sendmail(sender_email, [to], message.as_string())
+        server.sendmail(sender_email, [to] + ([cc] if cc else []), message.as_string())
+        server.quit()
+    except Exception as e:
+        raise Exception(f"Failed to send email: {str(e)}")
 
-def send_report_email(to: str, file_path: str, topic: str, date_range: str) -> None:
+def send_report_email(to: str, file_path: str, topic: str, date_range: str, cc: Optional[str] = None) -> None:
     """Send an email with a report attachment"""
     sender_email = os.getenv('EMAIL_SENDER')
     sender_password = os.getenv("EMAIL_PASSWORD")
     
+    # Validate required environment variables
     if not sender_email or not sender_password:
-        raise ValueError("Email sender credentials not configured")
+        raise ValueError("Missing required environment variables: EMAIL_SENDER or EMAIL_PASSWORD")
     
     subject = f"Your {topic} Report from {date_range} is Ready!"
     
@@ -133,10 +154,13 @@ def send_report_email(to: str, file_path: str, topic: str, date_range: str) -> N
         <p>If you have any questions or need any adjustments, feel free to reach out — we're here to help.</p>
     """
     
+    # Construct message
     message = MIMEMultipart()
     message['Subject'] = subject
     message['From'] = sender_email
     message['To'] = to
+    if cc:
+        message['Cc'] = cc
     
     html_content = create_html_message(content)
     html_part = MIMEText(html_content, "html")
@@ -153,6 +177,12 @@ def send_report_email(to: str, file_path: str, topic: str, date_range: str) -> N
         )
         message.attach(part)
     
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+    # Send email using Zoho SMTP with TLS
+    try:
+        server = smtplib.SMTP('smtp.zoho.com', 587)
+        server.starttls()
         server.login(sender_email, sender_password)
-        server.sendmail(sender_email, [to], message.as_string())
+        server.sendmail(sender_email, [to] + ([cc] if cc else []), message.as_string())
+        server.quit()
+    except Exception as e:
+        raise Exception(f"Failed to send email: {str(e)}")

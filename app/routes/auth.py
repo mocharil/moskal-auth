@@ -18,9 +18,9 @@ from app.schemas.user import (
 )
 from app.models.user import User as UserModel
 from typing import Optional
+from fastapi.middleware.cors import CORSMiddleware
 
 router = APIRouter(
-
     tags=["authentication"]
 )
 
@@ -44,8 +44,8 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_user)
     
-    # Send verification email with direct API endpoint
-    verification_url = f"{settings.BASE_URL}/api/v1/auth/verify-email?token={db_user.verification_token}"
+    # Send verification email with frontend verification page
+    verification_url = f"{settings.FRONTEND_URL}/verify-email?token={db_user.verification_token}"
     try:
         send_verification_email(user.email, verification_url)
     except Exception as e:
@@ -200,152 +200,26 @@ async def change_password(
         message="Password changed successfully"
     )
 
-from fastapi.responses import HTMLResponse
-
-@router.get("/verify-email", response_class=HTMLResponse)
+@router.get("/verify-email", response_model=UserResponse)
 async def verify_email(token: str, db: Session = Depends(get_db)):
     user = db.query(UserModel).filter(
         UserModel.verification_token == token
     ).first()
     
     if not user:
-        error_html = f"""
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Email Verification Failed</title>
-            <style>
-                body {{
-                    font-family: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
-                    background-color: #f5f5f5;
-                    margin: 0;
-                    padding: 0;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    min-height: 100vh;
-                }}
-                .container {{
-                    background-color: white;
-                    padding: 2rem;
-                    border-radius: 10px;
-                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                    text-align: center;
-                    max-width: 400px;
-                    width: 90%;
-                }}
-                .icon {{
-                    color: #dc3545;
-                    font-size: 4rem;
-                    margin-bottom: 1rem;
-                }}
-                h1 {{
-                    color: #dc3545;
-                    margin-bottom: 1rem;
-                }}
-                p {{
-                    color: #666;
-                    line-height: 1.6;
-                }}
-                .button {{
-                    display: inline-block;
-                    padding: 0.8rem 1.5rem;
-                    background-color: #dc3545;
-                    color: white;
-                    text-decoration: none;
-                    border-radius: 5px;
-                    margin-top: 1rem;
-                    transition: background-color 0.3s;
-                }}
-                .button:hover {{
-                    background-color: #c82333;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="icon">❌</div>
-                <h1>Verification Failed</h1>
-                <p>Sorry, the verification link is invalid or has expired. Please request a new verification link.</p>
-                <a href="{settings.FRONTEND_URL}/login" class="button">Go to Login</a>
-            </div>
-        </body>
-        </html>
-        """
-        return HTMLResponse(content=error_html, status_code=400)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token"
+        )
     
     user.is_verified = True
     user.verification_token = None
     db.commit()
     
-    success_html = f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Email Verification Success</title>
-        <style>
-            body {{
-                    font-family: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
-                background-color: #f5f5f5;
-                margin: 0;
-                padding: 0;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                min-height: 100vh;
-            }}
-            .container {{
-                background-color: white;
-                padding: 2rem;
-                border-radius: 10px;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                text-align: center;
-                max-width: 400px;
-                width: 90%;
-            }}
-            .icon {{
-                color: #28a745;
-                font-size: 4rem;
-                margin-bottom: 1rem;
-            }}
-            h1 {{
-                color: #28a745;
-                margin-bottom: 1rem;
-            }}
-            p {{
-                color: #666;
-                line-height: 1.6;
-            }}
-            .button {{
-                display: inline-block;
-                padding: 0.8rem 1.5rem;
-                background-color: #28a745;
-                color: white;
-                text-decoration: none;
-                border-radius: 5px;
-                margin-top: 1rem;
-                transition: background-color 0.3s;
-            }}
-            .button:hover {{
-                background-color: #218838;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="icon">✅</div>
-            <h1>Email Verified!</h1>
-            <p>Your email has been successfully verified. You can now log in to your account.</p>
-                <a href="{settings.FRONTEND_URL}/login" class="button">Go to Login</a>
-        </div>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=success_html)
+    return UserResponse(
+        status="success",
+        message="Email verified successfully"
+    )
 
 @router.post("/change-email", response_model=UserResponse)
 async def change_email(
@@ -384,7 +258,7 @@ async def change_email(
     db.commit()
     
     # Send verification email
-    verification_url = f"{settings.BASE_URL}/api/v1/auth/verify-email?token={current_user.verification_token}"
+    verification_url = f"{settings.FRONTEND_URL}/verify-email?token={current_user.verification_token}"
     try:
         send_verification_email(email_data.new_email, verification_url)
     except Exception as e:

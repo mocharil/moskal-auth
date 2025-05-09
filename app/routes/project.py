@@ -114,10 +114,19 @@ async def get_project_detail(
 
 @router.post("/onboarding", response_model=List[ProjectSchema])
 async def create_onboarding(
-    request: OnboardingRequest,
+    request: dict,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # Handle "All language" case by converting to "indonesia"
+    if "language" in request and request["language"] == "All language":
+        request["language"] = "indonesia"
+    
+    # Convert dict to OnboardingRequest for validation
+    try:
+        request = OnboardingRequest(**request)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
   
     # Check for duplicate project names
     for project_name in request.projects:
