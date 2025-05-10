@@ -349,6 +349,7 @@ async def list_projects(
             )
             added_project_ids.add(project.id)
     
+
     # Add globally accessible projects
     for global_access in global_accesses:
         owner_projects = db.query(Project).filter(
@@ -390,10 +391,10 @@ async def list_projects(
                 )
                 added_project_ids.add(project.id)
     
-    owned_projects.extend(accessible_projects)
+    list_owned_project_ids = [p["id"] for p in owned_projects]
     return ProjectListResponse(
         owned_projects=owned_projects,
-        accessible_projects=[]
+        accessible_projects=[i for i in accessible_projects if i.id not in list_owned_project_ids]
     )
 
 @router.delete("/remove")
