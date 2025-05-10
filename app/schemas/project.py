@@ -51,24 +51,32 @@ class Project(ProjectBase):
 
 # Access Management Schemas
 class GlobalAccessCreate(BaseModel):
-    user_id: int
+    user_email: str
     role: GlobalRole
 
-class GlobalAccess(GlobalAccessCreate):
+class GlobalAccessResponse(BaseModel):
     id: int
+    user_id: int
     owner_id: int
+    role: GlobalRole
     created_at: datetime
     updated_at: datetime
 
     class Config:
-        from_attributes = True  # New Pydantic v2 attribute for ORM mode
+        from_attributes = True
+
+class GlobalAccess(GlobalAccessResponse):
+    pass
 
 class ProjectAccessCreate(BaseModel):
-    user_id: int
+    user_email: str
     project_id: int
     role: ProjectRole
 
-class ProjectAccess(ProjectAccessCreate):
+class ProjectAccess(BaseModel):
+    user_id: int
+    project_id: int
+    role: ProjectRole
     id: int
     created_at: datetime
     updated_at: datetime
@@ -117,5 +125,44 @@ class ProjectDelete(BaseModel):
     project_id: int
 
 class AccessDelete(BaseModel):
-    user_id: int
+    user_email: str
     project_id: Optional[int] = None  # None for global access deletion
+
+class IndividualAccessListItem(BaseModel):
+    user_id: int
+    user_name: str
+    user_email: str
+    project_id: int
+    project_name: str
+    language: Language
+    owner_id: int
+    owner_name: str
+    owner_email: str
+    role: ProjectRole
+
+    class Config:
+        from_attributes = True
+
+class IndividualAccessListResponse(BaseModel):
+    items: List[IndividualAccessListItem]
+
+    class Config:
+        from_attributes = True
+
+class GlobalAccessListItem(BaseModel):
+    user_id: int
+    user_name: str
+    user_email: str
+    owner_id: int
+    owner_name: str
+    owner_email: str
+    role: GlobalRole
+
+    class Config:
+        from_attributes = True
+
+class GlobalAccessListResponse(BaseModel):
+    items: List[GlobalAccessListItem]
+
+    class Config:
+        from_attributes = True

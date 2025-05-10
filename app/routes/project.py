@@ -12,12 +12,18 @@ from app.schemas.project import (
     Project as ProjectSchema,
     GlobalAccessCreate,
     ProjectAccessCreate,
+    ProjectAccess,
     ProjectListResponse,
+    GlobalAccessResponse,
     ProjectAccessInfo,
     ProjectDetailRequest,
     ProjectDetailResponse,
     ProjectDelete,
-    AccessDelete
+    AccessDelete,
+    GlobalAccessListResponse,
+    GlobalAccessListItem,
+    IndividualAccessListResponse,
+    IndividualAccessListItem
 )
 from utils.relevan_keyword import get_relevan_keyword
 from sqlalchemy import and_
@@ -112,7 +118,22 @@ async def get_project_detail(
         global_role=global_role
     )
 
-@router.post("/onboarding", response_model=List[ProjectSchema])
+@router.post(
+    "/onboarding", 
+    response_model=List[ProjectSchema],
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "example": {
+                        "projects": ["Project A", "Project B", "Project C"],
+                        "language": "indonesia"
+                    }
+                }
+            }
+        }
+    }
+)
 async def create_onboarding(
     request: dict,
     current_user: User = Depends(get_current_user),
@@ -174,21 +195,21 @@ async def create_onboarding(
 
     return projects
 
-@router.post("/access/global", response_model=GlobalAccessCreate)
+@router.post("/access/global", response_model=GlobalAccessResponse)
 async def create_global_access(
     access: GlobalAccessCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     # Check if user exists
-    user = db.query(User).filter(User.id == access.user_id).first()
+    user = db.query(User).filter(User.email == access.user_email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
     # Check if access already exists
     existing_access = db.query(GlobalAccess).filter(
         GlobalAccess.owner_id == current_user.id,
-        GlobalAccess.user_id == access.user_id
+        GlobalAccess.user_id == user.id
     ).first()
     
     if existing_access:
@@ -196,7 +217,7 @@ async def create_global_access(
     
     global_access = GlobalAccess(
         owner_id=current_user.id,
-        user_id=access.user_id,
+        user_id=user.id,
         role=access.role
     )
     db.add(global_access)
@@ -205,7 +226,7 @@ async def create_global_access(
     
     return global_access
 
-@router.post("/access/project", response_model=ProjectAccessCreate)
+@router.post("/access/project", response_model=ProjectAccess)
 async def create_project_access(
     access: ProjectAccessCreate,
     current_user: User = Depends(get_current_user),
@@ -220,14 +241,14 @@ async def create_project_access(
         raise HTTPException(status_code=404, detail="Project not found or you're not the owner")
     
     # Check if user exists
-    user = db.query(User).filter(User.id == access.user_id).first()
+    user = db.query(User).filter(User.email == access.user_email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
     # Check if access already exists
     existing_access = db.query(UserProject).filter(
         UserProject.project_id == access.project_id,
-        UserProject.user_id == access.user_id
+        UserProject.user_id == user.id
     ).first()
     
     if existing_access:
@@ -235,7 +256,7 @@ async def create_project_access(
     
     project_access = UserProject(
         project_id=access.project_id,
-        user_id=access.user_id,
+        user_id=user.id,
         role=access.role
     )
     db.add(project_access)
@@ -293,39 +314,12 @@ async def list_projects(
     ).all()
     
     accessible_projects = []
+    added_project_ids = set()  # Track which projects have been added
     
-    # Add individually accessible projects
+    # Add individually accessible projects first
     for access in individual_accesses:
         project = access.project
-        # Get keywords for the project
-        keywords = db.execute(
-            text("""
-                SELECT relevan_keyword 
-                FROM keyword_projects 
-                WHERE project_id = :project_id 
-                AND owner_id = :owner_id
-            """),
-            {"project_id": project.id, "owner_id": project.owner_id}
-        ).fetchall()
-        
-        # Convert keywords to list and set it on the project
-        project.keywords = [k[0] for k in keywords] if keywords else None
-        
-        accessible_projects.append(
-            ProjectAccessInfo(
-                project=project,
-                role=access.role,
-                access_type="individual"
-            )
-        )
-    
-    # Add globally accessible projects
-    for global_access in global_accesses:
-        owner_projects = db.query(Project).filter(
-            Project.owner_id == global_access.owner_id
-        ).all()
-        
-        for project in owner_projects:
+        if project.id not in added_project_ids:  # Only add if not already added
             # Get keywords for the project
             keywords = db.execute(
                 text("""
@@ -340,16 +334,49 @@ async def list_projects(
             # Convert keywords to list and set it on the project
             project.keywords = [k[0] for k in keywords] if keywords else None
             
-            # Map global role to project role
-            project_role = ProjectRole.FULL_ACCESS if global_access.role == GlobalRole.ADMINISTRATOR else ProjectRole.PREVIEW_ONLY
-            
             accessible_projects.append(
                 ProjectAccessInfo(
                     project=project,
-                    role=project_role,
-                    access_type="global"
+                    role=access.role,
+                    access_type="individual"
                 )
             )
+            added_project_ids.add(project.id)
+    
+    # Add globally accessible projects
+    for global_access in global_accesses:
+        owner_projects = db.query(Project).filter(
+            Project.owner_id == global_access.owner_id
+        ).all()
+        
+        for project in owner_projects:
+            # Skip if project already added through individual access
+            if project.id not in added_project_ids:
+                # Get keywords for the project
+                keywords = db.execute(
+                    text("""
+                        SELECT relevan_keyword 
+                        FROM keyword_projects 
+                        WHERE project_id = :project_id 
+                        AND owner_id = :owner_id
+                    """),
+                    {"project_id": project.id, "owner_id": project.owner_id}
+                ).fetchall()
+                
+                # Convert keywords to list and set it on the project
+                project.keywords = [k[0] for k in keywords] if keywords else None
+                
+                # Map global role to project role
+                project_role = ProjectRole.FULL_ACCESS if global_access.role == GlobalRole.ADMINISTRATOR else ProjectRole.PREVIEW_ONLY
+                
+                accessible_projects.append(
+                    ProjectAccessInfo(
+                        project=project,
+                        role=project_role,
+                        access_type="global"
+                    )
+                )
+                added_project_ids.add(project.id)
     
     return ProjectListResponse(
         owned_projects=owned_projects,
@@ -398,6 +425,11 @@ async def remove_access(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # Get user by email
+    user = db.query(User).filter(User.email == request.user_email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
     if request.project_id:
         # Remove individual project access
         project = db.query(Project).filter(
@@ -413,7 +445,7 @@ async def remove_access(
         access = db.query(UserProject).filter(
             and_(
                 UserProject.project_id == request.project_id,
-                UserProject.user_id == request.user_id
+                UserProject.user_id == user.id
             )
         ).first()
         
@@ -429,7 +461,7 @@ async def remove_access(
         access = db.query(GlobalAccess).filter(
             and_(
                 GlobalAccess.owner_id == current_user.id,
-                GlobalAccess.user_id == request.user_id
+                GlobalAccess.user_id == user.id
             )
         ).first()
         
@@ -440,3 +472,82 @@ async def remove_access(
         db.commit()
         
         return {"message": "Global access successfully removed"}
+
+@router.get("/access/global-access/list", response_model=GlobalAccessListResponse)
+async def list_global_access(
+    owner_email: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Execute the query
+    result = db.execute(
+        text("""
+            select ga.*, owner_name, owner_email, user_name, user_email from global_accesses ga
+            join (select id, name owner_name, email owner_email from users) owner 
+            on ga.owner_id = owner.id
+            join (select id, name user_name, email user_email from users) user 
+            on ga.user_id = user.id
+            where owner_email = :owner_email
+        """),
+        {"owner_email": owner_email}
+    ).fetchall()
+
+    # Transform the results into the response format
+    items = [
+        GlobalAccessListItem(
+            user_id = row.user_id,
+            user_name=row.user_name,
+            user_email=row.user_email,
+            owner_id=row.owner_id,
+            owner_name=row.owner_name,
+            owner_email=row.owner_email,
+            role=row.role.lower()  # Convert to lowercase to match enum
+        )
+        for row in result
+    ]
+
+    return GlobalAccessListResponse(items=items)
+
+@router.get("/access/individual-project-access/list", response_model=IndividualAccessListResponse)
+async def list_individual_project_access(
+    owner_email: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Execute the query
+    result = db.execute(
+        text("""
+            select ga.user_id, ga.project_id, lower(ga.role) role, ga.created_at, ga.updated_at, user_name, user_email, project_name, p.language, 
+            p.owner_id, p.owner_name, p.owner_email
+
+            from user_projects ga
+            join (select id, name user_name, email user_email from users) user 
+            on ga.user_id = user.id
+            join (select projects.id, projects.name project_name, language, owner_id , users.name owner_name, users.email owner_email from projects
+                    join users 
+                    on users.id = projects.owner_id
+            ) p 
+            on p.id = ga.project_id
+            where p.owner_email = :owner_email
+        """),
+        {"owner_email": owner_email}
+    ).fetchall()
+
+    # Transform the results into the response format
+    items = [
+        IndividualAccessListItem(
+            user_id=row.user_id,
+            project_id=row.project_id,
+            user_name=row.user_name,
+            user_email=row.user_email,
+            project_name=row.project_name,
+            language=row.language.lower(),  # Convert to lowercase to match enum
+            owner_id=row.owner_id,
+            owner_name=row.owner_name,
+            owner_email=row.owner_email,
+            role=row.role  # This should be FULL_ACCESS or PREVIEW_ONLY
+        )
+        for row in result
+    ]
+
+    return IndividualAccessListResponse(items=items)

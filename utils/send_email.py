@@ -18,12 +18,20 @@ def create_html_message(content: str) -> str:
             .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
             .button {{ 
                 display: inline-block; 
-                padding: 10px 20px; 
-                background-color: #007bff; 
-                color: white; 
+                padding: 12px 24px; 
+                background-color: #5d98f0; 
+                color: #ffffff; 
                 text-decoration: none; 
-                border-radius: 5px; 
+                border-radius: 6px; 
                 margin: 20px 0;
+                font-weight: 500;
+                letter-spacing: 0.5px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                transition: all 0.3s ease;
+            }}
+            .button:hover {{
+                background-color: #0052cc;
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
             }}
             .footer {{ 
                 margin-top: 30px; 
