@@ -85,8 +85,7 @@ class ProjectAccess(BaseModel):
         from_attributes = True  # New Pydantic v2 attribute for ORM mode
 
 # Project List Response Schemas
-class ProjectAccessInfo(BaseModel):
-    project: Project
+class ProjectAccessInfo(Project):
     role: ProjectRole
     access_type: str = "individual"  # individual or global
 

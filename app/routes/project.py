@@ -336,7 +336,13 @@ async def list_projects(
             
             accessible_projects.append(
                 ProjectAccessInfo(
-                    project=project,
+                    name=project.name,
+                    language=project.language,
+                    id=project.id,
+                    owner_id=project.owner_id,
+                    created_at=project.created_at,
+                    updated_at=project.updated_at,
+                    keywords=project.keywords,
                     role=access.role,
                     access_type="individual"
                 )
@@ -371,16 +377,23 @@ async def list_projects(
                 
                 accessible_projects.append(
                     ProjectAccessInfo(
-                        project=project,
+                        name=project.name,
+                        language=project.language,
+                        id=project.id,
+                        owner_id=project.owner_id,
+                        created_at=project.created_at,
+                        updated_at=project.updated_at,
+                        keywords=project.keywords,
                         role=project_role,
                         access_type="global"
                     )
                 )
                 added_project_ids.add(project.id)
     
+    owned_projects.extend(accessible_projects)
     return ProjectListResponse(
         owned_projects=owned_projects,
-        accessible_projects=accessible_projects
+        accessible_projects=[]
     )
 
 @router.delete("/remove")
