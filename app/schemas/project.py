@@ -20,6 +20,7 @@ class ProjectRole(str, Enum):
 class OnboardingRequest(BaseModel):
     projects: List[str]
     language: Language
+    keywords: Optional[List[str]] = None
 
 # Project Schemas
 class ProjectBase(BaseModel):

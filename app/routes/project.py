@@ -127,7 +127,8 @@ async def get_project_detail(
                 "application/json": {
                     "example": {
                         "projects": ["Project A", "Project B", "Project C"],
-                        "language": "indonesia"
+                        "language": "indonesia",
+                        "keywords": ["keyword1", "keyword2"] 
                     }
                 }
             }
@@ -176,22 +177,43 @@ async def create_onboarding(
     for project in projects:
         db.refresh(project)
     
-    # Generate keywords for all projects
-    keywords_response = get_relevan_keyword(projects)
-    
-    if keywords_response["status"] == "success":
-        # Group keywords by project_id
-        keywords_by_project = {}
-        for item in keywords_response["data"]:
-            project_id = item["project_id"]
-            if project_id not in keywords_by_project:
-                keywords_by_project[project_id] = []
-            keywords_by_project[project_id].append(item["relevan_keyword"])
-        
-        # Update each project with its keywords
+    # Use provided keywords if available, otherwise generate them
+    if request.keywords:
+        # Save provided keywords to keyword_projects table
         for project in projects:
-            if project.id in keywords_by_project:
-                project.keywords = list(set(keywords_by_project[project.id]))
+            for keyword in request.keywords:
+                db.execute(
+                    text("""
+                        INSERT INTO keyword_projects (project_id, owner_id, relevan_keyword, project_name, created_at)
+                        VALUES (:project_id, :owner_id, :keyword, :project_name, :created_at)
+                    """),
+                    {
+                        "project_id": project.id,
+                        "owner_id": current_user.id,
+                        "keyword": keyword,
+                        "project_name": project.name,
+                        "created_at": project.created_at
+                    }
+                )
+            project.keywords = request.keywords
+        db.commit()
+    else:
+        # Generate keywords using get_relevan_keyword
+        keywords_response = get_relevan_keyword(projects)
+        
+        if keywords_response["status"] == "success":
+            # Group keywords by project_id
+            keywords_by_project = {}
+            for item in keywords_response["data"]:
+                project_id = item["project_id"]
+                if project_id not in keywords_by_project:
+                    keywords_by_project[project_id] = []
+                keywords_by_project[project_id].append(item["relevan_keyword"])
+            
+            # Update each project with its keywords
+            for project in projects:
+                if project.id in keywords_by_project:
+                    project.keywords = list(set(keywords_by_project[project.id]))
 
     return projects
 
@@ -404,6 +426,7 @@ async def remove_project(
     db: Session = Depends(get_db)
 ):
     # Check if project exists and user is owner
+    
     project = db.query(Project).filter(
         and_(
             Project.id == request.project_id,
