@@ -23,9 +23,11 @@ from app.schemas.project import (
     GlobalAccessListResponse,
     GlobalAccessListItem,
     IndividualAccessListResponse,
-    IndividualAccessListItem
+    IndividualAccessListItem,
+    ProjectUpdateKeywords
 )
 from sqlalchemy import and_
+from datetime import datetime
 
 
 router = APIRouter(
@@ -576,3 +578,125 @@ async def list_individual_project_access(
     ]
 
     return IndividualAccessListResponse(items=items)
+
+@router.put("/keywords", response_model=ProjectSchema)
+async def update_project_keywords(
+    request: ProjectUpdateKeywords,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(Project.id == request.project_id).first()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Check if the current user is the owner
+    is_owner = project.owner_id == current_user.id
+
+    # Check for individual full access if not the owner
+    has_individual_full_access = False
+    if not is_owner:
+        individual_access = db.query(UserProject).filter(
+            UserProject.project_id == project.id,
+            UserProject.user_id == current_user.id,
+            UserProject.role == ProjectRole.FULL_ACCESS
+        ).first()
+        if individual_access:
+            has_individual_full_access = True
+
+    # Check for global full access (administrator role) if not owner and no individual full access
+    has_global_full_access = False
+    if not is_owner and not has_individual_full_access:
+        global_access = db.query(GlobalAccess).filter(
+            GlobalAccess.owner_id == project.owner_id, # Check against project's owner
+            GlobalAccess.user_id == current_user.id,
+            GlobalAccess.role == GlobalRole.ADMINISTRATOR 
+        ).first()
+        if global_access:
+            has_global_full_access = True
+            
+    if not is_owner and not has_individual_full_access and not has_global_full_access:
+        raise HTTPException(status_code=403, detail="Not authorized to update keywords for this project")
+
+    # Delete existing keywords for the project
+    db.execute(
+        text("""
+            DELETE FROM keyword_projects 
+            WHERE project_id = :project_id AND owner_id = :owner_id
+        """),
+        {"project_id": project.id, "owner_id": project.owner_id} # Use project.owner_id here
+    )
+
+    # Add new keywords
+    all_keywords = list(set([k.lower() for k in request.keywords] + [project.name.lower()]))
+    
+    for keyword_text in all_keywords:
+        db.execute(
+            text("""
+                INSERT INTO keyword_projects (project_id, owner_id, relevan_keyword, project_name, created_at)
+                VALUES (:project_id, :owner_id, :keyword, :project_name, :created_at)
+            """),
+            {
+                "project_id": project.id,
+                "owner_id": project.owner_id, # Use project.owner_id here
+                "keyword": keyword_text,
+                "project_name": project.name,
+                "created_at": datetime.utcnow() 
+            }
+        )
+    
+    project.updated_at = datetime.utcnow()
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+
+    # Fetch keywords again to include in the response
+    updated_keywords_db = db.execute(
+        text("""
+            SELECT relevan_keyword 
+            FROM keyword_projects 
+            WHERE project_id = :project_id AND owner_id = :owner_id
+        """),
+        {"project_id": project.id, "owner_id": project.owner_id}
+    ).fetchall()
+    
+    project.keywords = [k[0] for k in updated_keywords_db] if updated_keywords_db else []
+
+    return project
+
+@router.delete("/{project_id_to_delete}", status_code=200)
+async def delete_project_by_id(
+    project_id_to_delete: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Check if project exists and current user is the owner
+    project = db.query(Project).filter(
+        Project.id == project_id_to_delete,
+        Project.owner_id == current_user.id
+    ).first()
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found or you are not the owner")
+
+    # Delete associated keywords from keyword_projects table
+    db.execute(
+        text("""
+            DELETE FROM keyword_projects 
+            WHERE project_id = :project_id AND owner_id = :owner_id
+        """),
+        {"project_id": project.id, "owner_id": current_user.id}
+    )
+
+    # Delete associated access records from user_projects table
+    db.query(UserProject).filter(UserProject.project_id == project.id).delete()
+    
+    # Note: GlobalAccess records are not directly tied to a single project deletion by ID,
+    # they are tied to an owner. If an owner is deleted, their global access grants would be handled elsewhere.
+    # Deleting a project should not affect global access rules set by its owner for other users across other projects.
+
+    # Delete the project itself
+    db.delete(project)
+    db.commit()
+
+    return {"message": f"Project with ID {project_id_to_delete} successfully deleted"}

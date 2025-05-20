@@ -50,6 +50,10 @@ class Project(ProjectBase):
     class Config:
         from_attributes = True  # New Pydantic v2 attribute for ORM mode
 
+class ProjectUpdateKeywords(BaseModel):
+    project_id: int
+    keywords: List[str]
+
 # Access Management Schemas
 class GlobalAccessCreate(BaseModel):
     user_email: str
