@@ -25,7 +25,6 @@ from app.schemas.project import (
     IndividualAccessListResponse,
     IndividualAccessListItem
 )
-from utils.relevan_keyword import get_relevan_keyword
 from sqlalchemy import and_
 
 
@@ -126,7 +125,7 @@ async def get_project_detail(
             "content": {
                 "application/json": {
                     "example": {
-                        "projects": ["Project A", "Project B", "Project C"],
+                        "projects": ["Project A"],
                         "language": "indonesia",
                         "keywords": ["keyword1", "keyword2"] 
                     }
@@ -181,7 +180,12 @@ async def create_onboarding(
     if request.keywords:
         # Save provided keywords to keyword_projects table
         for project in projects:
-            for keyword in request.keywords:
+
+            all_keywords = request.keywords
+            all_keywords.append(project.name)
+            all_keywords = list(set([i.lower() for i in all_keywords]))
+
+            for keyword in all_keywords:
                 db.execute(
                     text("""
                         INSERT INTO keyword_projects (project_id, owner_id, relevan_keyword, project_name, created_at)
@@ -195,26 +199,10 @@ async def create_onboarding(
                         "created_at": project.created_at
                     }
                 )
-            project.keywords = request.keywords
-        db.commit()
-    else:
-        # Generate keywords using get_relevan_keyword
-        keywords_response = get_relevan_keyword(projects)
-        
-        if keywords_response["status"] == "success":
-            # Group keywords by project_id
-            keywords_by_project = {}
-            for item in keywords_response["data"]:
-                project_id = item["project_id"]
-                if project_id not in keywords_by_project:
-                    keywords_by_project[project_id] = []
-                keywords_by_project[project_id].append(item["relevan_keyword"])
             
-            # Update each project with its keywords
-            for project in projects:
-                if project.id in keywords_by_project:
-                    project.keywords = list(set(keywords_by_project[project.id]))
-
+            project.keywords = all_keywords
+        db.commit()
+        
     return projects
 
 @router.post("/access/global", response_model=GlobalAccessResponse)
@@ -312,7 +300,7 @@ async def list_projects(
         
         # Convert keywords to list
         project_keywords = [k[0] for k in keywords] if keywords else None
-        
+        project_keywords.append(project.name)
         # Create a dict with project attributes
         project_dict = {
             "id": project.id,
