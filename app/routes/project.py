@@ -289,6 +289,7 @@ async def list_projects(
     
     owned_projects = []
     for project in owned_projects_query.all():
+        
         # Get keywords for each project
         keywords = db.execute(
             text("""
@@ -301,8 +302,9 @@ async def list_projects(
         ).fetchall()
         
         # Convert keywords to list
-        project_keywords = [k[0] for k in keywords] if keywords else None
+        project_keywords = [k[0] for k in keywords] if keywords else []
         project_keywords.append(project.name)
+
         # Create a dict with project attributes
         project_dict = {
             "id": project.id,
